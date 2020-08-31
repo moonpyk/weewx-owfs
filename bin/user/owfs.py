@@ -491,12 +491,18 @@ class OWFSDriver(AbstractDevice):
         be one of 'METRIC' or 'US'.  This assumes that all sensors are
         reporting data in the same unit system.
         [Optional. Default is METRIC]
+
+        max_tries: How many times the driver should try to get data from
+        a sensor before giving up.
+        [Optional. Default is 1]
         """
         self.sensor_map = stn_dict['sensor_map']
         self.sensor_type = stn_dict.get('sensor_type', {})
         self.interface = stn_dict.get('interface', 'u')
         self.polling_interval = int(stn_dict.get('polling_interval', 10))
         self.unit_system = stn_dict.get('unit_system', 'METRIC').lower()
+        self.max_tries = int(stn_dict.get('max_tries', 1))
+
         self.last_data = {}
         self.units = weewx.US if self.unit_system == 'us' else weewx.METRIC
 
@@ -506,6 +512,7 @@ class OWFSDriver(AbstractDevice):
         loginf('sensor type map is %s' % self.sensor_type)
         loginf('polling interval is %s' % str(self.polling_interval))
         loginf('sensor unit system is %s' % self.unit_system)
+        loginf('max tries value is %s' % str(self.max_tries))
 
         ow.init(self.interface)
 
@@ -528,13 +535,15 @@ class OWFSDriver(AbstractDevice):
                 if s in self.sensor_type:
                     st = self.sensor_type[s]
                 if st in SENSOR_TYPES:
-                    try:
-                        func = SENSOR_TYPES[st]
-                        p[s] = func(s, self.sensor_map[s],
-                                    last_data, p['dateTime'])
-                    except (OWError, ValueError) as e:
-                        logerr("Failed to get sensor data for %s (%s): %s" %
-                               (s, st, e))
+                    for tn in range(self.max_tries):
+                        try:
+                            func = SENSOR_TYPES[st]
+                            p[s] = func(s, self.sensor_map[s],
+                                        last_data, p['dateTime'])
+                            break
+                        except (OWError, ValueError) as e:
+                            logerr("Failed to get sensor data for %s (%s): %s (try %s of %s)" %
+                                   (s, st, e, tn + 1, self.max_tries))
                 else:
                     logerr("unknown sensor type '%s' for %s" % (st, s))
             self.last_data.update(last_data)
@@ -559,6 +568,10 @@ class OWFSService(StdService):
 
         sensor_type: Indicates how data should be processed before saving.
         [Optional. Default is gauge]
+
+        max_tries: How many times the service should try to get data from
+        a sensor before giving up.
+        [Optional. Default is 1]
         """
         super(OWFSService, self).__init__(engine, config_dict)
 
@@ -567,6 +580,7 @@ class OWFSService(StdService):
         self.sensor_type = d.get('sensor_type', {})
         self.interface = d.get('interface', 'u')
         self.unit_system = d.get('unit_system', 'METRIC').lower()
+        self.max_tries = int(d.get('max_tries', 1))
         self.binding = d.get('binding', 'archive')
         self.last_data = {}
         self.units = weewx.US if self.unit_system == 'us' else weewx.METRIC
@@ -577,6 +591,7 @@ class OWFSService(StdService):
         loginf('sensor map is %s' % self.sensor_map)
         loginf('sensor type map is %s' % self.sensor_type)
         loginf('sensor unit system is %s' % self.unit_system)
+        loginf('max tries value is %s' % str(self.max_tries))
 
         ow.init(self.interface)
 
@@ -613,12 +628,14 @@ class OWFSService(StdService):
                 st = self.sensor_type[s]
             if st in SENSOR_TYPES:
                 func = SENSOR_TYPES[st]
-                try:
-                    p[s] = func(s, self.sensor_map[s],
-                                last_data, packet['dateTime'])
-                except (OWError, ValueError) as e:
-                    logerr("Failed to get onewire data for %s (%s): %s" %
-                           (s, st, e))
+                for tn in range(self.max_tries):
+                    try:
+                        p[s] = func(s, self.sensor_map[s],
+                                    last_data, packet['dateTime'])
+                        break
+                    except (OWError, ValueError) as e:
+                        logerr("Failed to get onewire data for %s (%s): %s (try %s of %s)" %
+                               (s, st, e, tn + 1, self.max_tries))
             else:
                 logerr("unknown sensor type '%s' for %s" % (st, s))
         self.last_data.update(last_data)
